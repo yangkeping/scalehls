@@ -807,23 +807,52 @@ void HLSCppEstimator::estimateFunc() {
   int64_t numBram = 0;
   for (auto &pair : map) {
     auto memrefType = pair.first.getType().cast<MemRefType>();
-    auto partitionNum = getPartitionFactors(memrefType);
     auto storageType = MemoryKind(memrefType.getMemorySpace());
 
     if (storageType == MemoryKind::BRAM_1P ||
         storageType == MemoryKind::BRAM_S2P ||
         storageType == MemoryKind::BRAM_T2P) {
-      // Multiply bit width of type.
-      // TODO: handle index types.
-      int64_t memrefSize =
-          memrefType.getElementTypeBitWidth() * memrefType.getNumElements();
-      numBram += ((memrefSize + 18000 - 1) / 18000) * partitionNum;
+      int64_t partitionNum = getPartitionFactors(memrefType);
+
+      // Get the bit width of a data type
+      int64_t bitWidth;
+      if (memrefType.isIndex()) {
+        bitWidth = sizeof(unsigned int) * 4;
+      }
+      else {
+        bitWidth = memrefType.getElementTypeBitWidth();
+      }
+
+      // Get the maximum number of elements for a bit width
+      int64_t maxElements;
+      if (bitWidth > 18) {
+        maxElements = 512;
+      }
+      else if (bitWidth > 9) {
+        maxElements = 1024;
+      }
+      else if (bitWidth > 4) {
+        maxElements = 2048;
+      }
+      else if (bitWidth < 2) {
+        maxElements = 4096;
+      }
+      else if (bitWidth < 1) {
+        maxElements = 8192;
+      }
+      else {
+        maxElements = 16384;
+      }
+
+      // Compute the number of BRAMs
+      int64_t numElementsEach = (memrefType.getNumElements() + partitionNum - 1) / partitionNum;
+      numBram += (numElementsEach + maxElements - 1) / maxElements * partitionNum;
     }
   }
   resource.bram += numBram;
 
   setResourceValue(func, resource);
-  // TODO: estimate BRAM and LUT utilization.
+  // TODO: estimate and LUT utilization.
 }
 
 //===----------------------------------------------------------------------===//
