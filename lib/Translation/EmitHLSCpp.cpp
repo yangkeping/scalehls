@@ -12,6 +12,7 @@
 #include "mlir/Translation.h"
 #include "scalehls/Analysis/Utils.h"
 #include "scalehls/Dialect/HLSCpp/Visitor.h"
+#include "scalehls/Dialect/HLSKernel/Visitor.h"
 #include "scalehls/InitAllDialects.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -191,6 +192,21 @@ public:
 
   /// Top-level MLIR module emitter.
   void emitModule(ModuleOp module);
+
+  /// IP emitters. 
+  void emitAmaxIP(AmaxOp op);
+  void emitAminIP(AminOp op);
+  void emitAsumIP(AsumOp op);
+  void emitAxpyIP(AxpyOp op);
+  void emitDotIP(DotOp op);
+  void emitGbmvIP(GbmvOp op);
+  void emitGemmIP(GemmOp op);
+  void emitGemvIP(GemvOp op);
+  void emitNrm2IP(Nrm2Op op);
+  void emitScalIP(ScalOp op);
+  void emitSwapIP(SwapOp op);
+  void emitSymvIP(SymvOp op);
+  void emitTrmvIP(TrmvOp op);
 
 private:
   /// C++ component emitters.
@@ -418,6 +434,32 @@ private:
 };
 } // namespace
 
+namespace {
+class IPVisitor : public HLSKernelVisitorBase<IPVisitor, bool> {
+public:
+  IPVisitor(ModuleEmitter &emitter) : emitter(emitter) {}
+
+  using HLSKernelVisitorBase::visitOp;
+  /// IP operations.
+  bool visitOp(AmaxOp op) { return emitter.emitAmaxIP(op), true; }
+  bool visitOp(AminOp op) { return emitter.emitAminIP(op), true; }
+  bool visitOp(AsumOp op) { return emitter.emitAsumIP(op), true; }
+  bool visitOp(AxpyOp op) { return emitter.emitAxpyIP(op), true; }
+  bool visitOp(DotOp op) { return emitter.emitDotIP(op), true; }
+  bool visitOp(GbmvOp op) { return emitter.emitGbmvIP(op), true; }
+  bool visitOp(GemmOp op) { return emitter.emitGemmIP(op), true; }
+  bool visitOp(GemvOp op) { return emitter.emitGemvIP(op), true; }
+  bool visitOp(Nrm2Op op) { return emitter.emitNrm2IP(op), true; }
+  bool visitOp(ScalOp op) { return emitter.emitScalIP(op), true; }
+  bool visitOp(SwapOp op) { return emitter.emitSwapIP(op), true; }
+  bool visitOp(SymvOp op) { return emitter.emitSymvIP(op), true; }
+  bool visitOp(TrmvOp op) { return emitter.emitTrmvIP(op), true; }
+
+private:
+  ModuleEmitter &emitter;
+};
+} // namespace
+
 bool ExprVisitor::visitOp(CmpFOp op) {
   switch (op.getPredicate()) {
   case CmpFPredicate::OEQ:
@@ -463,6 +505,7 @@ bool ExprVisitor::visitOp(CmpIOp op) {
   case CmpIPredicate::uge:
     return emitter.emitBinary(op, ">="), true;
   }
+  return false;
 }
 
 //===----------------------------------------------------------------------===//
@@ -1333,6 +1376,9 @@ void ModuleEmitter::emitBlock(Block &block) {
     if (StmtVisitor(*this).dispatchVisitor(&op))
       continue;
 
+    if (IPVisitor(*this).dispatchVisitor(&op))
+      continue;
+
     emitError(&op, "can't be correctly emitted.");
   }
 }
@@ -1343,7 +1389,7 @@ void ModuleEmitter::emitArrayPragmas(Value memref) {
 
   // Emit resource pragma.
   auto kind = MemoryKind(type.getMemorySpace());
-  if (kind != MemoryKind::DRAM) {
+  if (kind != MemoryKind::DRAM && kind != MemoryKind::None) {
     emitPragmaFlag = true;
 
     indent();
@@ -1421,6 +1467,8 @@ void ModuleEmitter::emitFunctionPragmas(FuncOp func, ArrayRef<Value> portList) {
       // Array ports and scalar ports are handled separately. Here, we only
       // handle MemRef types since we assume the IR has be fully bufferized.
       if (auto memrefType = port.getType().dyn_cast<MemRefType>()) {
+        if (MemoryKind(memrefType.getMemorySpace()) == MemoryKind::None)
+          continue;
         indent();
         os << "#pragma HLS interface";
         // For now, we set the offset of all m_axi interfaces as slave.
@@ -1547,8 +1595,10 @@ void ModuleEmitter::emitModule(ModuleOp module) {
 #include <hls_stream.h>
 #include <math.h>
 #include <stdint.h>
+#include <xf_blas.hpp>
 
 using namespace std;
+using namespace xf::blas;
 
 )XXX";
 
@@ -1558,6 +1608,329 @@ using namespace std;
     else if (!isa<ModuleTerminatorOp>(op))
       emitError(&op, "is unsupported operation.");
   }
+}
+
+void ModuleEmitter::emitAmaxIP(AmaxOp op) {
+  // Amax HLS IP emitter. 
+  auto p_x = op.getOperands()[0];
+  auto p_goldRes = op.getOperands()[1];
+  auto p_n = p_x.getType().cast<ShapedType>().getShape()[0];
+  auto BLAS_dataType = "float";
+  if (p_x.getType().isa<Float64Type>())
+    BLAS_dataType = "double";
+  auto BLAS_resDataType = "float";
+  if (p_x.getType().isa<Float64Type>())
+    BLAS_resDataType = "double";
+  auto BLAS_logParEntries = 2;
+
+  os << "  #pragma HLS DATAFLOW\n";
+  os << "  " << BLAS_resDataType << " l_res;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", 1 << " << BLAS_logParEntries << ">::t_TypeInt> l_str;\n";
+  os << "  readVec2Stream<" << BLAS_dataType << ", 1 << " << BLAS_logParEntries << ">(" << getName(p_x) << ", " << p_n << ", l_str);\n";
+  os << "  amax<" << BLAS_dataType << ", " << BLAS_logParEntries << ", " << BLAS_resDataType << ">(" << p_n << ", l_str, l_res);\n";
+  os << "  " << getName(p_goldRes) << " = l_res;\n";
+}
+
+void ModuleEmitter::emitAminIP(AminOp op) {
+  // Amin HLS IP emitter. 
+  auto p_x = op.getOperands()[0];
+  auto p_goldRes = op.getOperands()[1];
+  auto p_n = p_x.getType().cast<ShapedType>().getShape()[0];
+  auto BLAS_dataType = "float";
+  if (p_x.getType().isa<Float64Type>())
+    BLAS_dataType = "double";
+  auto BLAS_resDataType = "float";
+  if (p_x.getType().isa<Float64Type>())
+    BLAS_resDataType = "double";
+  auto BLAS_logParEntries = 2;
+
+  os << "  #pragma HLS DATAFLOW\n";
+  os << "  " << BLAS_resDataType << " l_res;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", 1 << " << BLAS_logParEntries << ">::t_TypeInt> l_str;\n\n";
+  os << "  readVec2Stream<" << BLAS_dataType << ", 1 << " << BLAS_logParEntries << ">(" << getName(p_x) << ", " << p_n << ", l_str);\n";
+  os << "  amin<" << BLAS_dataType << ", " << BLAS_logParEntries << ", " << BLAS_resDataType << ">(" << p_n << ", l_str, l_res);\n";
+  os << "  " << getName(p_goldRes) << " = l_res;\n";
+}
+
+void ModuleEmitter::emitAsumIP(AsumOp op) {
+  // Asum HLS IP emitter. 
+  auto p_x = op.getOperands()[0];
+  auto p_goldRes = op.getOperands()[1];
+  auto p_n = p_x.getType().cast<ShapedType>().getShape()[0];
+  auto BLAS_dataType = "float";
+  if (p_x.getType().isa<Float64Type>())
+    BLAS_dataType = "double";
+  auto BLAS_resDataType = "float";
+  if (p_x.getType().isa<Float64Type>())
+    BLAS_resDataType = "double";
+  auto BLAS_logParEntries = 2;
+
+  os << "  #pragma HLS DATAFLOW\n";
+  os << "  " << BLAS_resDataType << " l_res;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", 1 << " << BLAS_logParEntries << ">::t_TypeInt> l_str;\n\n";
+  os << "  readVec2Stream<" << BLAS_dataType << ", 1 << " << BLAS_logParEntries << ">(" << getName(p_x) << ", " << p_n << ", l_str);\n";
+  os << "  asum<" << BLAS_dataType << ", " << BLAS_logParEntries << ", " << BLAS_resDataType << ">(" << p_n << ", l_str, l_res);\n";
+  os << "  " << getName(p_goldRes) << " = l_res;\n";
+}
+
+void ModuleEmitter::emitAxpyIP(AxpyOp op) {
+  // Axpy HLS IP emitter. 
+  auto p_alpha = op.getOperands()[0];
+  auto p_x = op.getOperands()[1];
+  auto p_y = op.getOperands()[2];
+  auto p_yRes = op.getOperands()[3];
+  auto p_n = p_x.getType().cast<ShapedType>().getShape()[0];
+  auto BLAS_dataType = "float";
+  if (p_x.getType().isa<Float64Type>())
+    BLAS_dataType = "double";
+  auto BLAS_logParEntries = 2;
+  auto BLAS_parEntries = 4;
+
+  os << "  #pragma HLS DATAFLOW\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", 1 << " << BLAS_logParEntries << ">::t_TypeInt> l_strX;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", 1 << " << BLAS_logParEntries << ">::t_TypeInt> l_strY;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", 1 << " << BLAS_logParEntries << ">::t_TypeInt> l_strR;\n\n";
+  os << "  readVec2Stream<" << BLAS_dataType << ", 1 << " << BLAS_logParEntries << ">(" << getName(p_x) << ", " << p_n << ", l_strX);\n";
+  os << "  readVec2Stream<" << BLAS_dataType << ", 1 << " << BLAS_logParEntries << ">(" << getName(p_y) << ", " << p_n << ", l_strY);\n";
+  os << "  axpy<" << BLAS_dataType << ", 1 << " << BLAS_logParEntries << ">(" << p_n << getName(p_alpha) << ", l_strX, l_strY, l_strR);\n";
+  os << "  writeStream2Vec<" << BLAS_dataType << ", " << BLAS_parEntries << ">(l_strR, " << p_n << ", " << getName(p_yRes) << ");\n";
+}
+
+void ModuleEmitter::emitDotIP(DotOp op) {
+  // Dot HLS IP emitter. 
+  auto p_x = op.getOperands()[0];
+  auto p_y = op.getOperands()[1];
+  auto p_goldRes = op.getOperands()[2];
+  auto p_n = p_x.getType().cast<ShapedType>().getShape()[0];
+  auto BLAS_dataType = "float";
+  if (p_x.getType().isa<Float64Type>())
+    BLAS_dataType = "double";
+  auto BLAS_resDataType = "float";
+  if (p_x.getType().isa<Float64Type>())
+    BLAS_resDataType = "double";
+  auto BLAS_logParEntries = 2;
+
+  os << "  #pragma HLS DATAFLOW\n";
+  os << "  " << BLAS_resDataType << " l_res;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", 1 << " << BLAS_logParEntries << ">::t_TypeInt> l_strX;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", 1 << " << BLAS_logParEntries << ">::t_TypeInt> l_strY;\n\n";
+  os << "  readVec2Stream<" << BLAS_dataType << ", 1 << " << BLAS_logParEntries << ">(" << getName(p_x) << ", " << p_n << ", l_strX);\n";
+  os << "  readVec2Stream<" << BLAS_dataType << ", 1 << " << BLAS_logParEntries << ">(" << getName(p_y) << ", " << p_n << ", l_strY);\n";
+  os << "  dot<" << BLAS_dataType << ", " << BLAS_logParEntries << ">(" << p_n << ", l_strX, l_strY, l_res);\n";
+  os << "  " << getName(p_goldRes) << " = l_res;\n";
+}
+
+void ModuleEmitter::emitGbmvIP(GbmvOp op) {
+  // Gbmv HLS IP emitter. 
+  auto p_alpha = op.getOperands()[0];
+  auto p_beta = op.getOperands()[1];
+  auto p_a = op.getOperands()[2];
+  auto p_x = op.getOperands()[3];
+  auto p_y = op.getOperands()[4];
+  auto p_yRes = op.getOperands()[5];
+  auto p_n = p_x.getType().cast<ShapedType>().getShape()[0];
+  auto p_m = p_y.getType().cast<ShapedType>().getShape()[0];
+  auto p_kl = 4;
+  auto p_ku = 3;
+  auto BLAS_dataType = "float";
+  if (p_x.getType().isa<Float64Type>())
+    BLAS_dataType = "double";
+  auto BLAS_logParEntries = 2;
+  auto BLAS_parEntries = 4;
+  auto BLAS_vectorSize = p_n;
+
+  os << "  #pragma HLS DATAFLOW\n";
+  os << "  hls::stream<typename WideType<BLAS_" << BLAS_dataType << "dataType, " << BLAS_parEntries << ">::t_TypeInt> l_strA;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", " << BLAS_parEntries << ">::t_TypeInt> l_strX;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", " << BLAS_parEntries << ">::t_TypeInt> l_strYR;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", " << BLAS_parEntries << ">::t_TypeInt> l_strY;\n\n";
+  os << "  gbm2Stream<" << BLAS_dataType << ", " << BLAS_parEntries << ">(" << p_n << ", " << p_kl << ", " << p_ku << ", " << getName(p_a) << ", l_strA);\n";
+  os << "  vec2GbMatStream<" << BLAS_dataType << ", " << BLAS_parEntries << ">(" << p_n << ", " << p_kl << ", " << p_ku << ", " << getName(p_x) << ", l_strX);\n";
+  os << "  readVec2Stream<" << BLAS_dataType << ", 1 << " << BLAS_logParEntries << ">(" << getName(p_y) << ", " << p_m << ", l_strY);\n";
+  os << "  gbmv<" << BLAS_dataType << ", " << BLAS_parEntries << ", " << BLAS_vectorSize << ">(" << p_m << ", " << p_n << ", " << p_kl << ", " << p_ku << ", " << getName(p_alpha) << ", l_strA, l_strX, " << getName(p_beta) << ", l_strY, l_strYR);\n";
+  os << "  writeStream2Vec<" << BLAS_dataType << ", " << BLAS_parEntries << ">(l_strYR, " << p_m << ", " << getName(p_yRes) << ");\n";
+}
+
+void ModuleEmitter::emitGemmIP(GemmOp op) {
+  // Gemm HLS IP emitter. 
+  auto p_alpha = op.getOperands()[0];
+  auto p_beta = op.getOperands()[1];
+  auto p_A = op.getOperands()[2];
+  auto p_B = op.getOperands()[3];
+  auto p_C = op.getOperands()[4];
+  auto p_R = op.getOperands()[5];
+  auto p_m = p_A.getType().cast<ShapedType>().getShape()[0];
+  auto p_k = p_A.getType().cast<ShapedType>().getShape()[1];
+  auto p_n = p_B.getType().cast<ShapedType>().getShape()[1];
+  auto valType = p_A.getType();
+  if (auto arrayType = p_A.getType().dyn_cast<ShapedType>())
+    valType = arrayType.getElementType();
+  auto BLAS_dataType = "float";
+  if (valType.isa<Float64Type>())
+    BLAS_dataType = "double";
+  else if(valType.isa<IndexType>())
+    BLAS_dataType = "int";
+  auto BLAS_parEntries = 4;
+  auto BLAS_matrixSizeC = p_m * p_n;
+  auto BLAS_k = p_k;
+
+  os << "  #pragma HLS DATAFLOW\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", " << BLAS_parEntries << ">::t_TypeInt> l_strA;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", " << BLAS_parEntries << ">::t_TypeInt> l_strB;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", " << BLAS_parEntries << ">::t_TypeInt> l_strC;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", " << BLAS_parEntries << ">::t_TypeInt> l_strSum;\n\n";
+  os << "  gemmMatAMover<" << BLAS_dataType << ", " << BLAS_parEntries << ">(" << getName(p_A) << ", " << p_m << ", " << p_n << ", " << p_k << ", l_strA);\n";
+  os << "  gemmMatBMover<" << BLAS_dataType << ", " << BLAS_parEntries << ">(" << getName(p_B) << ", " << p_m << ", " << p_n << ", " << p_k << ", l_strB);\n";
+  os << "  readVec2Stream<" << BLAS_dataType << ", " << BLAS_parEntries << ">(" << getName(p_C) << ", " << p_m * p_n << ", l_strC);\n";
+  os << "  gemm<" << BLAS_dataType << ", " << BLAS_k << ", " << BLAS_parEntries << ", " << BLAS_matrixSizeC << ">(" << p_m << ", " << p_n << ", " << p_k << ", " << getName(p_alpha) << ", l_strA, l_strB, " << getName(p_beta) << ", l_strC, l_strSum);\n";
+  os << "  writeStream2Vec<" << BLAS_dataType << ", " << BLAS_parEntries << ">(l_strSum, " << p_m * p_n << ", " << getName(p_R) << ");\n";
+}
+
+void ModuleEmitter::emitGemvIP(GemvOp op) {
+  // Gemv HLS IP emitter. 
+  auto p_alpha = op.getOperands()[0];
+  auto p_beta = op.getOperands()[1];
+  auto p_a = op.getOperands()[2];
+  auto p_x = op.getOperands()[3];
+  auto p_y = op.getOperands()[4];
+  auto p_yRes = op.getOperands()[5];
+  auto p_m = p_a.getType().cast<ShapedType>().getShape()[0];
+  auto p_n = p_a.getType().cast<ShapedType>().getShape()[1];
+  auto BLAS_dataType = "float";
+  if (p_x.getType().isa<Float64Type>())
+    BLAS_dataType = "double";
+  auto BLAS_logParEntries = 2;
+  auto BLAS_parEntries = 4;
+
+  os << "  #pragma HLS DATAFLOW\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", 1 << " << BLAS_logParEntries << ">::t_TypeInt> l_strA;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", 1 << " << BLAS_logParEntries << ">::t_TypeInt> l_strX;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", 1>::t_TypeInt> l_strY;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", 1>::t_TypeInt> l_strYR;\n\n";
+  os << "  gem2Stream<" << BLAS_dataType << ", " << BLAS_parEntries << ">(" << p_m << ", " << p_n << ", " << getName(p_a) << ", l_strA);\n";
+  os << "  vec2GemStream<" << BLAS_dataType << ", " << BLAS_parEntries << ">(" << p_m << ", " << p_n << ", " << getName(p_x) << ", l_strX);\n";
+  os << "  readVec2Stream<" << BLAS_dataType << ", 1>(" << getName(p_y) << ", " << p_m << ", l_strY);\n";
+  os << "  gemv<" << BLAS_dataType << ", " << BLAS_logParEntries << ">(" << p_m << ", " << p_n << ", " << getName(p_alpha) << ", l_strA, l_strX, " << getName(p_beta) << ", l_strY, l_strYR);\n";
+  os << "  writeStream2Vec<" << BLAS_dataType << ", 1>(l_strYR, " << p_m << ", " << getName(p_yRes) << ");\n";
+}
+
+void ModuleEmitter::emitNrm2IP(Nrm2Op op) {
+  // Nrm2 HLS IP emitter. 
+  auto p_x = op.getOperands()[0];
+  auto p_goldRes = op.getOperands()[1];
+  auto p_n = p_x.getType().cast<ShapedType>().getShape()[0];
+  auto BLAS_dataType = "float";
+  if (p_x.getType().isa<Float64Type>())
+    BLAS_dataType = "double";
+  auto BLAS_resDataType = "float";
+  if (p_x.getType().isa<Float64Type>())
+    BLAS_resDataType = "double";
+  auto BLAS_logParEntries = 2;
+
+  os << "  #pragma HLS DATAFLOW\n";
+  os << "  " << BLAS_resDataType << " l_res;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", 1 << " << BLAS_logParEntries << ">::t_TypeInt> l_strX;\n\n";
+  os << "  readVec2Stream<" << BLAS_dataType << ", 1 << " << BLAS_logParEntries << ">(" << getName(p_x) << ", " << p_n << ", l_strX);\n";
+  os << "  nrm2<" << BLAS_dataType << ", " << BLAS_logParEntries << ">(" << p_n << ", l_strX, l_res);\n";
+  os << "  " << getName(p_goldRes) << " = l_res;\n";
+}
+
+void ModuleEmitter::emitScalIP(ScalOp op) {
+  // Scal HLS IP emitter. 
+  auto p_alpha = op.getOperands()[0];
+  auto p_x = op.getOperands()[1];
+  auto p_xRes = op.getOperands()[2];
+  auto p_n = p_x.getType().cast<ShapedType>().getShape()[0];
+  auto BLAS_dataType = "float";
+  if (p_x.getType().isa<Float64Type>())
+    BLAS_dataType = "double";
+  auto BLAS_parEntries = 4;
+
+  os << "  #pragma HLS DATAFLOW\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", " << BLAS_parEntries << ">::t_TypeInt> l_strX;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", " << BLAS_parEntries << ">::t_TypeInt> l_strR;\n\n";
+  os << "  readVec2Stream<" << BLAS_dataType << ", " << BLAS_parEntries << ">(" << getName(p_x) << ", " << p_n << ", l_strX);\n";
+  os << "  scal<" << BLAS_dataType << ", " << BLAS_parEntries << ">(" << p_n << ", " << getName(p_alpha) << ", l_strX, l_strR);\n";
+  os << "  writeStream2Vec<" << BLAS_dataType << ", " << BLAS_parEntries << ">(l_strR, " << p_n << ", " << getName(p_xRes) << ");\n";
+}
+
+void ModuleEmitter::emitSwapIP(SwapOp op) {
+  // Swap HLS IP emitter. 
+  auto p_x = op.getOperands()[0];
+  auto p_xRes = op.getOperands()[1];
+  auto p_y = op.getOperands()[2];
+  auto p_yRes = op.getOperands()[3];
+  auto p_n = p_x.getType().cast<ShapedType>().getShape()[0];
+  auto BLAS_dataType = "float";
+  if (p_x.getType().isa<Float64Type>())
+    BLAS_dataType = "double";
+  auto BLAS_parEntries = 4;
+
+  os << "  #pragma HLS DATAFLOW\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", " << BLAS_parEntries << ">::t_TypeInt> l_strX;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", " << BLAS_parEntries << ">::t_TypeInt> l_strResX;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", " << BLAS_parEntries << ">::t_TypeInt> l_strY;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", " << BLAS_parEntries << ">::t_TypeInt> l_strResY;\n\n";
+  os << "  readVec2Stream<" << BLAS_dataType << ", " << BLAS_parEntries << ">(" << getName(p_x) << ", " << p_n << ", l_strX);\n";
+  os << "  readVec2Stream<" << BLAS_dataType << ", " << BLAS_parEntries << ">(" << getName(p_y) << ", " << p_n << ", l_strY);\n";
+  os << "  swap<" << BLAS_dataType << ", " << BLAS_parEntries << ">(" << p_n << ", l_strX, l_strY, l_strResX, l_strResY);\n";
+  os << "  writeStream2Vec<" << BLAS_dataType << ", " << BLAS_parEntries << ">(l_strResX, " << p_n << ", " << getName(p_xRes) << ");\n";
+  os << "  writeStream2Vec<" << BLAS_dataType << ", " << BLAS_parEntries << ">(l_strResY, " << p_n << ", " << getName(p_yRes) << ");\n";
+}
+
+void ModuleEmitter::emitSymvIP(SymvOp op) {
+  // Symv HLS IP emitter. 
+  auto p_alpha = op.getOperands()[0];
+  auto p_beta = op.getOperands()[1];
+  auto p_a = op.getOperands()[2];
+  auto p_x = op.getOperands()[3];
+  auto p_y = op.getOperands()[4];
+  auto p_yRes = op.getOperands()[5];
+  auto p_m = p_y.getType().cast<ShapedType>().getShape()[0];
+  auto p_n = p_x.getType().cast<ShapedType>().getShape()[0];
+  auto BLAS_dataType = "float";
+  if (p_x.getType().isa<Float64Type>())
+    BLAS_dataType = "double";
+  auto BLAS_logParEntries = 2;
+  auto BLAS_parEntries = 4;
+
+  os << "  #pragma HLS DATAFLOW\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", " << BLAS_parEntries << ">::t_TypeInt> l_strA;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", " << BLAS_parEntries << ">::t_TypeInt> l_strX;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", " << BLAS_parEntries << ">::t_TypeInt> l_strY;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", " << BLAS_parEntries << ">::t_TypeInt> l_strYR;\n\n";
+  os << "  symUp2Stream<" << BLAS_dataType << ", " << BLAS_parEntries << ">(" << p_n << ", " << getName(p_a) << ", l_strA);\n";
+  os << "  vec2SymStream<" << BLAS_dataType << ", " << BLAS_parEntries << ">(" << p_n << ", " << getName(p_x) << ", l_strX);\n";
+  os << "  readVec2Stream<" << BLAS_dataType << ", " << BLAS_parEntries << ">(" << getName(p_y) << ", " << p_m << ", l_strY);\n";
+  os << "  symv<" << BLAS_dataType << ", " << BLAS_logParEntries << ">(" << p_m << ", " << getName(p_alpha) << ", l_strA, l_strX, " << getName(p_beta) << ", l_strY, l_strYR);\n";
+  os << "  writeStream2Vec<" << BLAS_dataType << ", " << BLAS_parEntries << ">(l_strYR, " << p_m << ", " << getName(p_yRes) << ");\n";
+}
+
+void ModuleEmitter::emitTrmvIP(TrmvOp op) {
+  // Trmv HLS IP emitter. 
+  auto p_alpha = op.getOperands()[0];
+  auto p_beta = op.getOperands()[1];
+  auto p_a = op.getOperands()[2];
+  auto p_x = op.getOperands()[3];
+  auto p_y = op.getOperands()[4];
+  auto p_yRes = op.getOperands()[5];
+  auto p_n = p_x.getType().cast<ShapedType>().getShape()[0];
+  auto BLAS_dataType = "float";
+  if (p_x.getType().isa<Float64Type>())
+    BLAS_dataType = "double";
+  auto BLAS_logParEntries = 2;
+  auto BLAS_parEntries = 4;
+
+  os << "  #pragma HLS DATAFLOW\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", " << BLAS_parEntries << ">::t_TypeInt> l_strA;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", " << BLAS_parEntries << ">::t_TypeInt> l_strX;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", 1>::t_TypeInt> l_strY;\n";
+  os << "  hls::stream<typename WideType<" << BLAS_dataType << ", 1>::t_TypeInt> l_strYR;\n\n";
+  os << "  trmUp2Stream<" << BLAS_dataType << ", " << BLAS_parEntries << ">(" << p_n << ", " << getName(p_a) << ", l_strA);\n";
+  os << "  vec2TrmUpStream<" << BLAS_dataType << ", " << BLAS_parEntries << ">(" << p_n << ", " << getName(p_x) << ", l_strX);\n";
+  os << "  readVec2Stream<" << BLAS_dataType << ", 1>(" << getName(p_y) << ", " << p_n << ", l_strY);\n";
+  os << "  trmv<" << BLAS_dataType << ", " << BLAS_logParEntries << ">(true, " << p_n << ", " << getName(p_alpha) << ", l_strA, l_strX, " << getName(p_beta) << ", l_strY, l_strYR);\n";
+  os << "  writeStream2Vec<" << BLAS_dataType << ", 1>(l_strYR, " << p_n << ", " << getName(p_yRes) << ");\n";
 }
 
 //===----------------------------------------------------------------------===//

@@ -25,7 +25,8 @@ enum class MemoryKind {
   // URAM_S2P = 4,
   // URAM_T2P = 5,
 
-  DRAM = 3
+  DRAM = 3,
+  None = 4
 };
 
 enum class PartitionKind { CYCLIC = 0, BLOCK = 1, NONE = 2 };

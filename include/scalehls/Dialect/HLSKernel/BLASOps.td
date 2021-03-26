@@ -7,6 +7,79 @@
 #ifndef SCALEHLS_DIALECT_HLSKERNEL_BLASOPS_TD
 #define SCALEHLS_DIALECT_HLSKERNEL_BLASOPS_TD
 
+def AmaxOp : HLSKernelOp<"amax", [HLSKernelOpInterface]> {
+  let summary = "amax operation";
+  let description = [{}];
+
+  let arguments = (ins
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$x,
+    AnyType:$p_goldRes,
+    DefaultValuedAttr<BoolAttr, "false">:$IP
+  );
+}
+
+def AminOp : HLSKernelOp<"amin", [HLSKernelOpInterface]> {
+  let summary = "amin operation";
+  let description = [{}];
+
+  let arguments = (ins
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$x,
+    AnyType:$p_goldRes,
+    DefaultValuedAttr<BoolAttr, "false">:$IP
+  );
+}
+
+def AsumOp : HLSKernelOp<"asum", [HLSKernelOpInterface]> {
+  let summary = "asum operation";
+  let description = [{}];
+
+  let arguments = (ins
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$x,
+    AnyType:$p_goldRes,
+    DefaultValuedAttr<BoolAttr, "false">:$IP
+  );
+}
+
+def AxpyOp : HLSKernelOp<"axpy", [HLSKernelOpInterface]> {
+  let summary = "axpy operation";
+  let description = [{}];
+
+  let arguments = (ins
+    AnyType:$alpha,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$x,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$y,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$yRes,
+    DefaultValuedAttr<BoolAttr, "false">:$IP
+  );
+}
+
+def DotOp : HLSKernelOp<"dot", [HLSKernelOpInterface]> {
+  let summary = "dot operation";
+  let description = [{}];
+
+  let arguments = (ins
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$x,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$y,
+    AnyType:$p_goldRes,
+    DefaultValuedAttr<BoolAttr, "false">:$IP
+  );
+}
+
+def GbmvOp : HLSKernelOp<"gbmv", [HLSKernelOpInterface]> {
+  let summary = "gbmv operation";
+  let description = [{}];
+
+  let arguments = (ins
+    AnyType:$alpha,
+    AnyType:$beta,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$a,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$x,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$y,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$yRes,
+    DefaultValuedAttr<BoolAttr, "false">:$IP
+  );
+}
+
 def GemmOp : HLSKernelOp<"gemm", [HLSKernelOpInterface]> {
   let summary = "gemm operation";
   let description = [{
@@ -27,7 +100,60 @@ def GemmOp : HLSKernelOp<"gemm", [HLSKernelOpInterface]> {
     AnyType:$beta,
     AnyTypeOf<[AnyTensor, AnyMemRef]>:$A,
     AnyTypeOf<[AnyTensor, AnyMemRef]>:$B,
-    AnyTypeOf<[AnyTensor, AnyMemRef]>:$C
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$C,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$R,
+    DefaultValuedAttr<BoolAttr, "false">:$IP
+  );
+}
+
+def GemvOp : HLSKernelOp<"gemv", [HLSKernelOpInterface]> {
+  let summary = "gemv operation";
+  let description = [{}];
+
+  let arguments = (ins
+    AnyType:$alpha,
+    AnyType:$beta,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$a,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$x,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$y,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$yRes,
+    DefaultValuedAttr<BoolAttr, "false">:$IP
+  );
+}
+
+def Nrm2Op : HLSKernelOp<"nrm2", [HLSKernelOpInterface]> {
+  let summary = "nrm2 operation";
+  let description = [{}];
+
+  let arguments = (ins
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$x,
+    AnyType:$p_goldRes,
+    DefaultValuedAttr<BoolAttr, "false">:$IP
+  );
+}
+
+def ScalOp : HLSKernelOp<"scal", [HLSKernelOpInterface]> {
+  let summary = "scal operation";
+  let description = [{}];
+
+  let arguments = (ins
+    AnyType:$alpha,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$x,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$xRes,
+    DefaultValuedAttr<BoolAttr, "false">:$IP
+  );
+}
+
+def SwapOp : HLSKernelOp<"swap", [HLSKernelOpInterface]> {
+  let summary = "swap operation";
+  let description = [{}];
+
+  let arguments = (ins
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$x,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$y,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$xRes,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$yRes,
+    DefaultValuedAttr<BoolAttr, "false">:$IP
   );
 }
 
@@ -56,6 +182,21 @@ def SymmOp : HLSKernelOp<"symm", [HLSKernelOpInterface]> {
     AnyTypeOf<[AnyTensor, AnyMemRef]>:$A,
     AnyTypeOf<[AnyTensor, AnyMemRef]>:$B,
     AnyTypeOf<[AnyTensor, AnyMemRef]>:$C
+  );
+}
+
+def SymvOp : HLSKernelOp<"symv", [HLSKernelOpInterface]> {
+  let summary = "symv operation";
+  let description = [{}];
+
+  let arguments = (ins
+    AnyType:$alpha,
+    AnyType:$beta,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$a,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$x,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$y,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$yRes,
+    DefaultValuedAttr<BoolAttr, "false">:$IP
   );
 }
 
@@ -140,6 +281,21 @@ def TrmmOp : HLSKernelOp<"trmm", [HLSKernelOpInterface]> {
     AnyType:$alpha,
     AnyTypeOf<[AnyTensor, AnyMemRef]>:$A,
     AnyTypeOf<[AnyTensor, AnyMemRef]>:$B
+  );
+}
+
+def TrmvOp : HLSKernelOp<"trmv", [HLSKernelOpInterface]> {
+  let summary = "trmv operation";
+  let description = [{}];
+
+  let arguments = (ins
+    AnyType:$alpha,
+    AnyType:$beta,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$a,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$x,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$y,
+    AnyTypeOf<[AnyTensor, AnyMemRef]>:$yRes,
+    DefaultValuedAttr<BoolAttr, "false">:$IP
   );
 }
 

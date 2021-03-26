@@ -398,6 +398,9 @@ bool HLSKernelVisitor::visitOp(CopyOp op) {
 
 /// Only default attributes configuration are supported.
 bool HLSKernelVisitor::visitOp(GemmOp op) {
+  if(op.IP()) {
+    return true;
+  }
   auto alpha = op.getOperand(0);
   auto beta = op.getOperand(1);
 

@@ -64,8 +64,9 @@ public:
 
   /// This callback is invoked on any invalid operations.
   ResultType visitInvalidOp(Operation *op, ExtraArgs... args) {
-    op->emitOpError("is unsupported operation.");
-    abort();
+    // op->emitOpError("is unsupported operation.");
+    // abort();
+    return ResultType();
   }
 
   /// This callback is invoked on any operations that are not handled by the

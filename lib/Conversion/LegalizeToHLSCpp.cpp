@@ -61,7 +61,7 @@ void LegalizeToHLSCpp::runOnOperation() {
 
     if (type.getMemorySpace() == 0) {
       // TODO: determine memory kind according to data type.
-      MemoryKind kind = MemoryKind::BRAM_S2P;
+      MemoryKind kind = MemoryKind::None;
 
       auto newType = MemRefType::get(type.getShape(), type.getElementType(),
                                      type.getAffineMaps(), (unsigned)kind);
