@@ -27,5 +27,7 @@ include "Interfaces.td"
 
 include "CNNOps.td"
 include "BLASOps.td"
+include "DSPOps.td"
+include "SolverOps.td"
 
 #endif // SCALEHLS_DIALECT_HLSKERNEL_HLSKERNEL_TD

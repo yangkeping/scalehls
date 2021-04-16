@@ -193,7 +193,7 @@ public:
   /// Top-level MLIR module emitter.
   void emitModule(ModuleOp module);
 
-  /// IP emitters. 
+  /// BLAS IP emitters. 
   void emitAmaxIP(AmaxOp op);
   void emitAminIP(AminOp op);
   void emitAsumIP(AsumOp op);
@@ -207,6 +207,12 @@ public:
   void emitSwapIP(SwapOp op);
   void emitSymvIP(SymvOp op);
   void emitTrmvIP(TrmvOp op);
+
+  /// DSP IP emitters. 
+  void emitFFTIP(FFTOp op);
+
+  /// Solver IP emitters. 
+  void emitPSqrtIP(PSqrtOp op);
 
 private:
   /// C++ component emitters.
@@ -440,7 +446,7 @@ public:
   IPVisitor(ModuleEmitter &emitter) : emitter(emitter) {}
 
   using HLSKernelVisitorBase::visitOp;
-  /// IP operations.
+  /// BLAS IP operations.
   bool visitOp(AmaxOp op) { return emitter.emitAmaxIP(op), true; }
   bool visitOp(AminOp op) { return emitter.emitAminIP(op), true; }
   bool visitOp(AsumOp op) { return emitter.emitAsumIP(op), true; }
@@ -454,6 +460,12 @@ public:
   bool visitOp(SwapOp op) { return emitter.emitSwapIP(op), true; }
   bool visitOp(SymvOp op) { return emitter.emitSymvIP(op), true; }
   bool visitOp(TrmvOp op) { return emitter.emitTrmvIP(op), true; }
+
+  /// DSP IP operations. 
+  bool visitOp(FFTOp op) { return emitter.emitFFTIP(op), true; }
+
+  /// Solver IP operations. 
+  bool visitOp(PSqrtOp op) { return emitter.emitPSqrtIP(op), true; }
 
 private:
   ModuleEmitter &emitter;
@@ -1932,6 +1944,31 @@ void ModuleEmitter::emitTrmvIP(TrmvOp op) {
   os << "  trmv<" << BLAS_dataType << ", " << BLAS_logParEntries << ">(true, " << p_n << ", " << getName(p_alpha) << ", l_strA, l_strX, " << getName(p_beta) << ", l_strY, l_strYR);\n";
   os << "  writeStream2Vec<" << BLAS_dataType << ", 1>(l_strYR, " << p_n << ", " << getName(p_yRes) << ");\n";
 }
+
+void ModuleEmitter::emitFFTIP(FFTOp op) {
+  // FFT HLS IP emitter. 
+  auto inData = op.getOperands()[0];
+  auto outData = op.getOperands()[1];
+  auto fftParams = "fftParams";
+  auto IID = 0;
+
+  os << "  xf::dsp::fft::fft<" << fftParams << ", " << IID << ">(" << getName(inData) << ", " << getName(outData) << ");\n";
+}
+
+void ModuleEmitter::emitPSqrtIP(PSqrtOp op) {
+  // FFT HLS IP emitter. 
+  auto nrows = op.getOperands()[0];
+  auto matIn = op.getOperands()[1];
+  auto matOut = op.getOperands()[2];
+  auto DT = "float";
+  if (matIn.getType().isa<Float64Type>())
+    DT = "double";
+  auto matSize = matIn.getType().cast<ShapedType>().getShape()[0];
+  auto unrollNm1 = 2;
+
+  os << "  xf::solver::pseudosqrt<" << DT << ", " << matSize << ", " << unrollNm1 << ">(" << getName(nrows) << ", " << getName(matIn) << ", " << getName(matOut) << ");\n";
+}
+
 
 //===----------------------------------------------------------------------===//
 // Entry of scalehls-translate

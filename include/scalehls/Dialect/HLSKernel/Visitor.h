@@ -25,7 +25,11 @@ public:
             // CNN operations.
             DenseOp, ConvOp, MaxPoolOp, ReluOp, MergeOp, CopyOp,
             // BLAS operations.
-            AmaxOp, AminOp, AsumOp, AxpyOp, DotOp, GbmvOp, GemmOp, GemvOp, Nrm2Op, ScalOp, SwapOp, SymmOp, SymvOp, SyrkOp, Syr2kOp, TrmmOp, TrmvOp>(
+            AmaxOp, AminOp, AsumOp, AxpyOp, DotOp, GbmvOp, GemmOp, GemvOp, Nrm2Op, ScalOp, SwapOp, SymmOp, SymvOp, SyrkOp, Syr2kOp, TrmmOp, TrmvOp, 
+            // DSP operations. 
+            FFTOp, 
+            // Solver operations. 
+            PSqrtOp>(
             [&](auto opNode) -> ResultType {
               return thisCast->visitOp(opNode, args...);
             })
@@ -77,6 +81,12 @@ public:
   HANDLE(Syr2kOp);
   HANDLE(TrmmOp);
   HANDLE(TrmvOp);
+
+  // DSP operations. 
+  HANDLE(FFTOp);
+
+  // Solver operations. 
+  HANDLE(PSqrtOp);
 
 #undef HANDLE
 };
