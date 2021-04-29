@@ -29,7 +29,9 @@ public:
             // DSP operations. 
             FFTOp, 
             // Solver operations. 
-            PSqrtOp>(
+            PSqrtOp,
+            // General IP operations. 
+            IPOp>(
             [&](auto opNode) -> ResultType {
               return thisCast->visitOp(opNode, args...);
             })
@@ -87,6 +89,9 @@ public:
 
   // Solver operations. 
   HANDLE(PSqrtOp);
+
+  // General IP operations. 
+  HANDLE(IPOp);
 
 #undef HANDLE
 };

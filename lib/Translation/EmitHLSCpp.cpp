@@ -214,6 +214,9 @@ public:
   /// Solver IP emitters. 
   void emitPSqrtIP(PSqrtOp op);
 
+  /// General IP emitter. 
+  void emitIP(IPOp op);
+
 private:
   /// C++ component emitters.
   void emitValue(Value val, unsigned rank = 0, bool isPtr = false);
@@ -466,6 +469,9 @@ public:
 
   /// Solver IP operations. 
   bool visitOp(PSqrtOp op) { return emitter.emitPSqrtIP(op), true; }
+
+  /// General IP operations. 
+  bool visitOp(IPOp op) { return emitter.emitIP(op), true; }
 
 private:
   ModuleEmitter &emitter;
@@ -1967,6 +1973,21 @@ void ModuleEmitter::emitPSqrtIP(PSqrtOp op) {
   auto unrollNm1 = 2;
 
   os << "  xf::solver::pseudosqrt<" << DT << ", " << matSize << ", " << unrollNm1 << ">(" << getName(nrows) << ", " << getName(matIn) << ", " << getName(matOut) << ");\n";
+}
+
+void ModuleEmitter::emitIP(IPOp op) {
+  // General IP emitter. 
+  auto name = op.name();
+  os << "  __IP__" << name << "(";
+
+  unsigned argIdx = 0;
+  for (auto arg : op.getOperands()) {
+    emitValue(arg);
+    if (argIdx++ != op.getOperands().size() - 1) {
+      os << ", ";
+    }
+  }
+  os << ");\n";
 }
 
 
